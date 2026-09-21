@@ -17,8 +17,8 @@ def list_ebooks(db: Session = Depends(get_db)) -> list[Ebook]:
 
 @router.post("/", response_model=EbookRead, status_code=status.HTTP_201_CREATED)
 def create_ebook(payload: EbookCreate, request: Request, db: Session = Depends(get_db)) -> Ebook:
-    require_admin(request, db)
-    ebook = Ebook(**payload.model_dump())
+    admin_email = require_admin(request, db)
+    ebook = Ebook(**payload.model_dump(), uploader_email=admin_email)
     db.add(ebook)
     db.commit()
     db.refresh(ebook)

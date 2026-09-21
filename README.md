@@ -26,6 +26,10 @@ The template landing page is available at `/`. Add browser assets in `app/static
 
 Visit `/admin/books/new` to upload a PDF and enter its title, short description, extended description, and price. Each PDF is stored in `app/media/ebooks`; its first page is rendered to a JPEG in `app/media/thumbnails` and displayed in the storefront. Uploading requires Google sign-in. The master administrator (`barasapeter52@gmail.com`, configurable with `MASTER_ADMIN_EMAIL`) can open `/admin/register` to authorise additional Google email addresses. Configure `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and register `/admin/auth/google/callback` as an authorised redirect URI in Google Cloud. Set `GOOGLE_OAUTH_REDIRECT_URL` to the public callback URL when the app runs behind a proxy.
 
+Every upload is owned by the signed-in administrator. `/admin/dashboard` shows that administrator's books, sales, revenue, and most recent transactions. A completed M-Pesa payment creates one paid sale; each completed free download is recorded as a KSh 0.00 sale. Existing books are assigned to the master administrator when the SQLite upgrade runs.
+
+From the dashboard, an owner can edit a book's normal price and run a timed discount. A live public countdown shows the remaining discount time; checkout charges the discounted price only until the configured end time, then automatically reverts to the normal price.
+
 The listing's Download link opens `/books/{book_id}/checkout` for paid books, which presents full book details and payment-method choices. Set a book's price to `0` in the uploader to mark it **Free**: its Download link serves the PDF immediately. The payment button is intentionally a UI placeholder until a payment provider is selected and integrated.
 
 Every book also has a shareable public page at `/books/{book_id}`. It presents a direct download for free books and the checkout path for paid books.

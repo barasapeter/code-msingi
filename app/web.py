@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 import json
 
@@ -6,13 +7,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.ebook import Ebook
 from app.models.admin_user import AdminUser
 from app.models.payment import MpesaPayment
+from app.models.sale import Sale
 from app.services.pdf_uploads import MEDIA_DIR, PDF_DIR, save_pdf_and_thumbnail
 from app.services.mpesa import MpesaApiError, initiate_stk_push, normalize_kenyan_phone
 from app.services.google_auth import (
@@ -72,7 +74,7 @@ def checkout(book_id: int, request: Request, db: Session = Depends(get_db)):
     book = db.get(Ebook, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    if book.price <= 0:
+    if book.current_price <= 0:
         return RedirectResponse(url=f"/books/{book.id}/download", status_code=303)
     return templates.TemplateResponse(request, "checkout.html", {"book": book})
 
@@ -82,7 +84,7 @@ def begin_mpesa_checkout(book_id: int, request: Request, db: Session = Depends(g
     book = db.get(Ebook, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    if book.price <= 0:
+    if book.current_price <= 0:
         return RedirectResponse(url=f"/books/{book.id}/download", status_code=303)
     request.session["mpesa_book_id"] = book.id
     return RedirectResponse(url="/payments/mpesa", status_code=303)
@@ -92,10 +94,11 @@ def begin_mpesa_checkout(book_id: int, request: Request, db: Session = Depends(g
 def mpesa_payment_page(request: Request, db: Session = Depends(get_db)):
     book_id = request.session.get("mpesa_book_id")
     book = db.get(Ebook, book_id) if isinstance(book_id, int) else None
-    if book is None or book.price <= 0:
+    if book is None or book.current_price <= 0:
         raise HTTPException(
             status_code=403, detail="Choose a paid book before opening M-Pesa checkout."
         )
+    amount = book.current_price
     payment = session_payment(request, db, book.id)
     payment_state = None
     if payment is not None:
@@ -118,24 +121,26 @@ async def request_mpesa_payment(
 ):
     book_id = request.session.get("mpesa_book_id")
     book = db.get(Ebook, book_id) if isinstance(book_id, int) else None
-    if book is None or book.price <= 0:
+    if book is None or book.current_price <= 0:
         raise HTTPException(
             status_code=403, detail="Your M-Pesa checkout session has expired."
         )
+    # Snapshot the applicable price so a discount cannot change mid-request.
+    amount = book.current_price
     try:
         digits = normalize_kenyan_phone(payload.phone_number)
     except ValueError:
         return JSONResponse(
             {
                 "ok": False,
-                "message": "Enter a valid Kenyan M-Pesa number, e.g. 0712 345 678.",
+                "message": "Enter a valid number, e.g. 0712 345 678.",
             },
             status_code=422,
         )
     try:
         result = await initiate_stk_push(
             phone=digits,
-            amount=book.price,
+            amount=amount,
             account_reference=f"BOOK-{book.id}",
             description=f"Ebook {book.id}",
         )
@@ -165,6 +170,7 @@ async def request_mpesa_payment(
         phone_number=digits,
         checkout_request_id=checkout_request_id,
         merchant_request_id=result.get("MerchantRequestID"),
+        amount=amount,
     )
     db.add(payment)
     db.commit()
@@ -212,6 +218,10 @@ async def mpesa_callback(
     if payment is not None:
         payment.status = "paid" if callback.get("ResultCode") == 0 else "failed"
         payment.callback_payload = json.dumps(payload)
+        if payment.status == "paid" and db.scalar(select(Sale.id).where(Sale.payment_id == payment.id)) is None:
+            book = db.get(Ebook, payment.book_id)
+            if book is not None:
+                db.add(Sale(book_id=book.id, seller_email=book.uploader_email or get_settings().master_admin_email, amount=payment.amount if payment.amount is not None else book.current_price, sale_type="mpesa_payment", payment_id=payment.id))
         db.commit()
 
     return {"ResultCode": 0}
@@ -224,7 +234,7 @@ def download_book(
     book = db.get(Ebook, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    if book.price > 0:
+    if book.current_price > 0:
         checkout_request_id = request.session.get("mpesa_checkout_request_id")
         payment = db.scalar(
             select(MpesaPayment).where(
@@ -247,6 +257,9 @@ def download_book(
     pdf_file = PDF_DIR / book.pdf_path.rsplit("/", 1)[-1]
     if not pdf_file.is_file():
         raise HTTPException(status_code=404, detail="The book PDF is unavailable.")
+    if book.current_price <= 0:
+        db.add(Sale(book_id=book.id, seller_email=book.uploader_email or get_settings().master_admin_email, amount=0, sale_type="free_download"))
+        db.commit()
     return FileResponse(
         pdf_file, media_type="application/pdf", filename=f"{book.title}.pdf"
     )
@@ -324,6 +337,57 @@ def new_book_form(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/admin/dashboard")
+def admin_dashboard(request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    if admin_email is None:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    books = list(db.scalars(select(Ebook).where(Ebook.uploader_email == admin_email).order_by(Ebook.created_at.desc(), Ebook.id.desc())))
+    book_count = db.scalar(select(func.count(Ebook.id)).where(Ebook.uploader_email == admin_email)) or 0
+    sale_count, revenue = db.execute(select(func.count(Sale.id), func.coalesce(func.sum(Sale.amount), 0)).where(Sale.seller_email == admin_email)).one()
+    sales = list(db.execute(select(Sale, Ebook.title).join(Ebook, Ebook.id == Sale.book_id).where(Sale.seller_email == admin_email).order_by(Sale.created_at.desc(), Sale.id.desc()).limit(50)))
+    return templates.TemplateResponse(request, "admin_dashboard.html", {"admin_email": admin_email, "books": books, "book_count": book_count, "sale_count": sale_count, "revenue": revenue, "sales": sales})
+
+
+@router.get("/admin/books/{book_id}/pricing")
+def edit_book_pricing(book_id: int, request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    book = db.get(Ebook, book_id)
+    if admin_email is None:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    if book is None or book.uploader_email != admin_email:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return templates.TemplateResponse(request, "admin_book_pricing.html", {"book": book})
+
+
+@router.post("/admin/books/{book_id}/pricing")
+def update_book_pricing(book_id: int, request: Request, price: float = Form(...), discount_enabled: bool = Form(False), discount_amount: float = Form(0), discount_ends_at: str = Form(""), db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    book = db.get(Ebook, book_id)
+    if admin_email is None:
+        raise HTTPException(status_code=401, detail="Sign in to edit this book.")
+    if book is None or book.uploader_email != admin_email:
+        raise HTTPException(status_code=404, detail="Book not found")
+    if price < 0:
+        raise HTTPException(status_code=422, detail="Price cannot be negative.")
+    ends_at = None
+    if discount_enabled:
+        try:
+            ends_at = datetime.fromisoformat(discount_ends_at)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Choose when the discount ends.")
+        if discount_amount <= 0 or discount_amount >= price:
+            raise HTTPException(status_code=422, detail="Discount must be greater than zero and less than the normal price.")
+        if ends_at <= datetime.now():
+            raise HTTPException(status_code=422, detail="Discount end time must be in the future.")
+    book.price = price
+    book.discount_enabled = discount_enabled
+    book.discount_amount = discount_amount if discount_enabled else 0
+    book.discount_ends_at = ends_at
+    db.commit()
+    return RedirectResponse(url="/admin/dashboard", status_code=303)
+
+
 @router.post("/admin/books/new")
 async def create_book_from_upload(
     request: Request,
@@ -354,6 +418,7 @@ async def create_book_from_upload(
         price=price,
         pdf_path=pdf_path,
         thumbnail_path=thumbnail_path,
+        uploader_email=admin_email,
     )
     db.add(book)
     db.commit()

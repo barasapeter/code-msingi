@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Checkout — {{ book.title }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}"><link rel="stylesheet" href="{{ url_for('static', path='css/mpesa.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}"><link rel="stylesheet" href="{{ url_for('static', path='css/mpesa.css') }}"><script defer src="{{ url_for('static', path='js/discount.js') }}"></script>
   </head>
   <body>
     <main class="checkout">
@@ -13,7 +13,7 @@
         <section>
           <p class="eyebrow">Your e-book</p><h1>{{ book.title }}</h1><p class="book-author">By {{ book.author }}</p>
           <p class="lead">{{ book.description }}</p><p>{{ book.details }}</p>
-          <p class="checkout-price">KSh {{ '%.2f'|format(book.price) }}</p>
+          <p class="checkout-price">{% if book.active_discount %}<span class="discount-label">KES {{ '%.2f'|format(book.discount_amount) }} OFF!</span> <s>KSh {{ '%.2f'|format(book.price) }}</s> KSh {{ '%.2f'|format(book.current_price) }}{% else %}KSh {{ '%.2f'|format(book.price) }}{% endif %}</p>{% if book.active_discount %}<p class="discount-countdown" data-discount-ends-at="{{ book.discount_ends_at.isoformat() }}"></p>{% endif %}
           <h2>Choose a payment method</h2>
           <form class="payment-options" action="/books/{{ book.id }}/checkout/mpesa" method="post">
             <label class="selected-payment"><input type="radio" name="payment_method" value="mpesa" checked><span><strong>M-Pesa</strong><small>Pay with your mobile money account</small></span></label>

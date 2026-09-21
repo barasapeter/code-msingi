@@ -5,7 +5,7 @@
     <title>{{ book.title }} — Code Msingi</title>
     <meta name="description" content="{{ book.description }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}">
-    <script defer src="{{ url_for('static', path='js/site.js') }}"></script>
+    <script defer src="{{ url_for('static', path='js/site.js') }}"></script><script defer src="{{ url_for('static', path='js/discount.js') }}"></script>
   </head>
   <body>
     <main class="book-page">
@@ -16,7 +16,9 @@
           <p class="eyebrow">{% if book.price <= 0 %}Free e-book{% else %}E-book{% endif %}</p>
           <h1>{{ book.title }}</h1><p class="book-author">By {{ book.author }}</p>
           <p class="lead">{{ book.description }}</p><p>{{ book.details }}</p>
-          {% if book.price <= 0 %}
+          {% if book.active_discount %}
+            <p class="checkout-price"><span class="discount-label">KES {{ '%.2f'|format(book.discount_amount) }} OFF!</span> <s>KSh {{ '%.2f'|format(book.price) }}</s> KSh {{ '%.2f'|format(book.current_price) }}</p><p class="discount-countdown" data-discount-ends-at="{{ book.discount_ends_at.isoformat() }}"></p><a class="button" href="/books/{{ book.id }}/checkout">Buy and download</a>
+          {% elif book.price <= 0 %}
             <p class="checkout-price">Free</p>
             <a class="button" href="/books/{{ book.id }}/download">Download e-book</a>
             <p class="payment-note">No payment required. Your PDF download begins immediately.</p>

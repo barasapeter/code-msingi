@@ -17,4 +17,16 @@ class Ebook(Base):
     price: Mapped[float] = mapped_column(Float)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    uploader_email: Mapped[str | None] = mapped_column(String(320), index=True, nullable=True)
+    discount_enabled: Mapped[bool] = mapped_column(default=False)
+    discount_amount: Mapped[float] = mapped_column(Float, default=0)
+    discount_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    @property
+    def active_discount(self) -> bool:
+        return bool(self.discount_enabled and self.discount_amount > 0 and self.discount_amount < self.price and self.discount_ends_at is not None and self.discount_ends_at > datetime.now())
+
+    @property
+    def current_price(self) -> float:
+        return self.price - self.discount_amount if self.active_discount else self.price

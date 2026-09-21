@@ -42,8 +42,19 @@ def run_migrations() -> None:
         "details": "TEXT",
         "pdf_path": "VARCHAR(500)",
         "thumbnail_path": "VARCHAR(500)",
+        "uploader_email": "VARCHAR(320)",
+        "discount_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "discount_amount": "FLOAT NOT NULL DEFAULT 0",
+        "discount_ends_at": "DATETIME",
     }
     with engine.begin() as connection:
         for name, sql_type in upgrades.items():
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE ebooks ADD COLUMN {name} {sql_type}"))
+        connection.execute(
+            text("UPDATE ebooks SET uploader_email = :master WHERE uploader_email IS NULL OR uploader_email = ''"),
+            {"master": settings.master_admin_email},
+        )
+        payment_columns = {column["name"] for column in inspector.get_columns("mpesa_payments")} if "mpesa_payments" in inspector.get_table_names() else set()
+        if "mpesa_payments" in inspector.get_table_names() and "amount" not in payment_columns:
+            connection.execute(text("ALTER TABLE mpesa_payments ADD COLUMN amount FLOAT"))

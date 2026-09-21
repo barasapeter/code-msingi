@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Upload book — Code Msingi</title><link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}"><script defer src="{{ url_for('static', path='js/site.js') }}"></script></head>
-<body><main class="admin"><a href="/">← Back to library</a><p class="eyebrow">Signed in as {{ admin_email }}</p><h1>Upload an e-book</h1>{% if is_master_admin %}<p><a class="text-button" href="/admin/register">Manage authorised uploaders</a></p>{% endif %}<form action="/admin/logout" method="post"><button class="text-button" type="submit">Sign out</button></form>
+<body><main class="admin"><a href="/">← Back to library</a><p class="eyebrow">Signed in as {{ admin_email }}</p><h1>Upload an e-book</h1><p><a class="text-button" href="/admin/dashboard">View my sales dashboard</a></p>{% if is_master_admin %}<p><a class="text-button" href="/admin/register">Manage authorised uploaders</a></p>{% endif %}<form action="/admin/logout" method="post"><button class="text-button" type="submit">Sign out</button></form>
 {% if created %}<p class="notice"><strong>{{ created.title }}</strong> was published. Its cover thumbnail was created from page one.</p>{% endif %}
 <form method="post" enctype="multipart/form-data">
   <label>Title<input id="title" name="title" required maxlength="255"><small>Filled automatically from the PDF filename; you can edit it.</small></label>
