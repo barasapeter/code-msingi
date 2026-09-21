@@ -130,7 +130,6 @@ async def request_mpesa_payment(
             account_reference=f"BOOK-{book.id}",
             description=f"Ebook {book.id}",
         )
-        print("Result:", result)
     except MpesaApiError as exc:
         return JSONResponse({"ok": False, "message": str(exc)}, status_code=502)
     except (RuntimeError, httpx.HTTPError, KeyError):
@@ -206,8 +205,6 @@ async def mpesa_callback(
         payment.callback_payload = json.dumps(payload)
         db.commit()
 
-    import pprint
-    pprint.pprint(payload)
     return {"ResultCode": 0}
 
 

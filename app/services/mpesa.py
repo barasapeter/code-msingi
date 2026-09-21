@@ -44,7 +44,7 @@ def normalize_kenyan_phone(phone: str) -> str:
     if digits.startswith("0"):
         digits = f"254{digits[1:]}"
     if len(digits) != 12 or not digits.startswith("254"):
-        raise ValueError("Enter a valid Kenyan M-Pesa number.")
+        raise ValueError("Enter a valid phone number.")
     return digits
 
 
