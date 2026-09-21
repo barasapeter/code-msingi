@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 from uuid import uuid4
 
 import pymupdf
@@ -11,6 +12,33 @@ THUMBNAIL_DIR = MEDIA_DIR / "thumbnails"
 MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
 THUMBNAIL_WIDTH = 480
 MAX_THUMBNAIL_SCALE = 1.75
+
+
+async def hash_pdf_upload(upload: UploadFile) -> str:
+    """Validate and calculate a SHA-256 fingerprint without saving the PDF."""
+    if not upload.filename or Path(upload.filename).suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="Please upload a PDF file.")
+    await upload.seek(0)
+    digest = hashlib.sha256()
+    size = 0
+    first_bytes = b""
+    while chunk := await upload.read(1024 * 1024):
+        if not first_bytes:
+            first_bytes = chunk[:5]
+        size += len(chunk)
+        if size > MAX_PDF_SIZE:
+            raise HTTPException(status_code=413, detail="PDF files may be at most 50 MB.")
+        digest.update(chunk)
+    await upload.seek(0)
+    if first_bytes != b"%PDF-":
+        raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF.")
+    return digest.hexdigest()
+
+
+def remove_saved_upload(pdf_path: str, thumbnail_path: str) -> None:
+    """Remove assets created for an upload that could not be stored in the DB."""
+    (PDF_DIR / Path(pdf_path).name).unlink(missing_ok=True)
+    (THUMBNAIL_DIR / Path(thumbnail_path).name).unlink(missing_ok=True)
 
 
 async def save_pdf_and_thumbnail(upload: UploadFile) -> tuple[str, str]:

@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,7 +16,7 @@ from app.models.ebook import Ebook
 from app.models.admin_user import AdminUser
 from app.models.payment import MpesaPayment
 from app.models.sale import Sale
-from app.services.pdf_uploads import MEDIA_DIR, PDF_DIR, save_pdf_and_thumbnail
+from app.services.pdf_uploads import MEDIA_DIR, PDF_DIR, hash_pdf_upload, remove_saved_upload, save_pdf_and_thumbnail
 from app.services.mpesa import MpesaApiError, initiate_stk_push, normalize_kenyan_phone
 from app.services.google_auth import (
     current_admin_email,
@@ -63,25 +64,33 @@ def session_payment(request: Request, db: Session, book_id: int) -> MpesaPayment
     )
 
 
+def active_book(db: Session, book_id: int) -> Ebook | None:
+    return db.scalar(select(Ebook).where(Ebook.id == book_id, Ebook.deleted_at.is_(None)))
+
+
+def can_manage_book(book: Ebook, admin_email: str) -> bool:
+    return admin_email == get_settings().master_admin_email or book.uploader_email == admin_email
+
+
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
-    books = list(db.scalars(select(Ebook).order_by(Ebook.id.desc())))
+    books = list(db.scalars(select(Ebook).where(Ebook.deleted_at.is_(None)).order_by(Ebook.id.desc())))
     return templates.TemplateResponse(request, "index.html", {"books": books})
 
 
 @router.get("/books/{book_id}/checkout")
 def checkout(book_id: int, request: Request, db: Session = Depends(get_db)):
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     if book.current_price <= 0:
         return RedirectResponse(url=f"/books/{book.id}/download", status_code=303)
-    return templates.TemplateResponse(request, "checkout.html", {"book": book})
+    return RedirectResponse(url=f"/books/{book.id}", status_code=303)
 
 
 @router.post("/books/{book_id}/checkout/mpesa")
 def begin_mpesa_checkout(book_id: int, request: Request, db: Session = Depends(get_db)):
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     if book.current_price <= 0:
@@ -93,12 +102,11 @@ def begin_mpesa_checkout(book_id: int, request: Request, db: Session = Depends(g
 @router.get("/payments/mpesa")
 def mpesa_payment_page(request: Request, db: Session = Depends(get_db)):
     book_id = request.session.get("mpesa_book_id")
-    book = db.get(Ebook, book_id) if isinstance(book_id, int) else None
+    book = active_book(db, book_id) if isinstance(book_id, int) else None
     if book is None or book.current_price <= 0:
         raise HTTPException(
             status_code=403, detail="Choose a paid book before opening M-Pesa checkout."
         )
-    amount = book.current_price
     payment = session_payment(request, db, book.id)
     payment_state = None
     if payment is not None:
@@ -120,7 +128,7 @@ async def request_mpesa_payment(
     request: Request, payload: MpesaPaymentRequest, db: Session = Depends(get_db)
 ):
     book_id = request.session.get("mpesa_book_id")
-    book = db.get(Ebook, book_id) if isinstance(book_id, int) else None
+    book = active_book(db, book_id) if isinstance(book_id, int) else None
     if book is None or book.current_price <= 0:
         raise HTTPException(
             status_code=403, detail="Your M-Pesa checkout session has expired."
@@ -231,7 +239,7 @@ async def mpesa_callback(
 def download_book(
     book_id: int, request: Request, db: Session = Depends(get_db)
 ) -> FileResponse:
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     if book.current_price > 0:
@@ -268,7 +276,7 @@ def download_book(
 @router.get("/books/{book_id}")
 def book_detail(book_id: int, request: Request, db: Session = Depends(get_db)):
     """Canonical, shareable public page for one book."""
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
     return templates.TemplateResponse(request, "book_detail.html", {"book": book})
@@ -342,20 +350,90 @@ def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     admin_email = current_admin_email(request, db)
     if admin_email is None:
         return RedirectResponse(url="/admin/login", status_code=303)
-    books = list(db.scalars(select(Ebook).where(Ebook.uploader_email == admin_email).order_by(Ebook.created_at.desc(), Ebook.id.desc())))
+    book_filter = Ebook.deleted_at.is_(None)
+    if admin_email != get_settings().master_admin_email:
+        book_filter = book_filter & (Ebook.uploader_email == admin_email)
+    books = list(db.scalars(select(Ebook).where(book_filter).order_by(Ebook.created_at.desc(), Ebook.id.desc())))
     book_count = db.scalar(select(func.count(Ebook.id)).where(Ebook.uploader_email == admin_email)) or 0
     sale_count, revenue = db.execute(select(func.count(Sale.id), func.coalesce(func.sum(Sale.amount), 0)).where(Sale.seller_email == admin_email)).one()
     sales = list(db.execute(select(Sale, Ebook.title).join(Ebook, Ebook.id == Sale.book_id).where(Sale.seller_email == admin_email).order_by(Sale.created_at.desc(), Sale.id.desc()).limit(50)))
-    return templates.TemplateResponse(request, "admin_dashboard.html", {"admin_email": admin_email, "books": books, "book_count": book_count, "sale_count": sale_count, "revenue": revenue, "sales": sales})
+    return templates.TemplateResponse(request, "admin_dashboard.html", {"admin_email": admin_email, "books": books, "book_count": book_count, "sale_count": sale_count, "revenue": revenue, "sales": sales, "is_master_admin": admin_email == get_settings().master_admin_email})
+
+
+@router.post("/admin/books/{book_id}/delete")
+def soft_delete_book(book_id: int, request: Request, db: Session = Depends(get_db)):
+    """Remove a book from the storefront while retaining it for recovery."""
+    admin_email = current_admin_email(request, db)
+    if admin_email is None:
+        raise HTTPException(status_code=401, detail="Sign in to delete this book.")
+    book = active_book(db, book_id)
+    if book is None or not can_manage_book(book, admin_email):
+        raise HTTPException(status_code=404, detail="Book not found")
+    book.deleted_at = datetime.now()
+    book.deleted_by = admin_email
+    db.commit()
+    return RedirectResponse(url="/admin/dashboard", status_code=303)
+
+
+@router.get("/admin/trash")
+def admin_trash(request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    if admin_email != get_settings().master_admin_email:
+        raise HTTPException(status_code=403, detail="Only the master administrator can view the trash.")
+    books = list(
+        db.scalars(
+            select(Ebook)
+            .where(Ebook.deleted_at.is_not(None))
+            .order_by(Ebook.deleted_at.desc(), Ebook.id.desc())
+        )
+    )
+    return templates.TemplateResponse(request, "admin_trash.html", {"books": books})
+
+
+@router.post("/admin/trash/{book_id}/restore")
+def restore_book(book_id: int, request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    if admin_email != get_settings().master_admin_email:
+        raise HTTPException(status_code=403, detail="Only the master administrator can restore books.")
+    book = db.scalar(select(Ebook).where(Ebook.id == book_id, Ebook.deleted_at.is_not(None)))
+    if book is None:
+        raise HTTPException(status_code=404, detail="Deleted book not found")
+    book.deleted_at = None
+    book.deleted_by = None
+    db.commit()
+    return RedirectResponse(url="/admin/trash", status_code=303)
+
+
+@router.post("/admin/trash/{book_id}/delete-permanently")
+def permanently_delete_book(book_id: int, request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    if admin_email != get_settings().master_admin_email:
+        raise HTTPException(status_code=403, detail="Only the master administrator can permanently delete books.")
+    book = db.scalar(select(Ebook).where(Ebook.id == book_id, Ebook.deleted_at.is_not(None)))
+    if book is None:
+        raise HTTPException(status_code=404, detail="Deleted book not found")
+    pdf_path, thumbnail_path = book.pdf_path, book.thumbnail_path
+    # A permanent deletion removes records that cannot remain without the book.
+    db.execute(delete(Sale).where(Sale.book_id == book.id))
+    db.execute(delete(MpesaPayment).where(MpesaPayment.book_id == book.id))
+    db.delete(book)
+    db.commit()
+    if pdf_path and thumbnail_path:
+        remove_saved_upload(pdf_path, thumbnail_path)
+    elif pdf_path:
+        (PDF_DIR / Path(pdf_path).name).unlink(missing_ok=True)
+    elif thumbnail_path:
+        (MEDIA_DIR / "thumbnails" / Path(thumbnail_path).name).unlink(missing_ok=True)
+    return RedirectResponse(url="/admin/trash", status_code=303)
 
 
 @router.get("/admin/books/{book_id}/pricing")
 def edit_book_pricing(book_id: int, request: Request, db: Session = Depends(get_db)):
     admin_email = current_admin_email(request, db)
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if admin_email is None:
         return RedirectResponse(url="/admin/login", status_code=303)
-    if book is None or book.uploader_email != admin_email:
+    if book is None or not can_manage_book(book, admin_email):
         raise HTTPException(status_code=404, detail="Book not found")
     return templates.TemplateResponse(request, "admin_book_pricing.html", {"book": book})
 
@@ -363,10 +441,10 @@ def edit_book_pricing(book_id: int, request: Request, db: Session = Depends(get_
 @router.post("/admin/books/{book_id}/pricing")
 def update_book_pricing(book_id: int, request: Request, price: float = Form(...), discount_enabled: bool = Form(False), discount_amount: float = Form(0), discount_ends_at: str = Form(""), db: Session = Depends(get_db)):
     admin_email = current_admin_email(request, db)
-    book = db.get(Ebook, book_id)
+    book = active_book(db, book_id)
     if admin_email is None:
         raise HTTPException(status_code=401, detail="Sign in to edit this book.")
-    if book is None or book.uploader_email != admin_email:
+    if book is None or not can_manage_book(book, admin_email):
         raise HTTPException(status_code=404, detail="Book not found")
     if price < 0:
         raise HTTPException(status_code=422, detail="Price cannot be negative.")
@@ -409,6 +487,15 @@ async def create_book_from_upload(
             status_code=422, detail="A book title or PDF filename is required."
         )
 
+    content_hash = await hash_pdf_upload(pdf)
+    existing_book = db.scalar(select(Ebook).where(Ebook.content_hash == content_hash))
+    if existing_book is not None:
+        await pdf.close()
+        raise HTTPException(
+            status_code=409,
+            detail=f"This PDF is already in the library as '{existing_book.title}'.",
+        )
+
     pdf_path, thumbnail_path = await save_pdf_and_thumbnail(pdf)
     book = Ebook(
         title=final_title[:255],
@@ -418,10 +505,16 @@ async def create_book_from_upload(
         price=price,
         pdf_path=pdf_path,
         thumbnail_path=thumbnail_path,
+        content_hash=content_hash,
         uploader_email=admin_email,
     )
     db.add(book)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        remove_saved_upload(pdf_path, thumbnail_path)
+        raise HTTPException(status_code=409, detail="This PDF was uploaded by another user moments ago.")
     return templates.TemplateResponse(
         request,
         "admin_new_book.html",

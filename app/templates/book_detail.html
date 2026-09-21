@@ -17,19 +17,19 @@
           <h1>{{ book.title }}</h1><p class="book-author">By {{ book.author }}</p>
           <p class="lead">{{ book.description }}</p><p>{{ book.details }}</p>
           {% if book.active_discount %}
-            <p class="checkout-price"><span class="discount-label">KES {{ '%.2f'|format(book.discount_amount) }} OFF!</span> <s>KSh {{ '%.2f'|format(book.price) }}</s> KSh {{ '%.2f'|format(book.current_price) }}</p><p class="discount-countdown" data-discount-ends-at="{{ book.discount_ends_at.isoformat() }}"></p><a class="button" href="/books/{{ book.id }}/checkout">Buy and download</a>
+            <p class="checkout-price"><span class="discount-label">KES {{ '%.2f'|format(book.discount_amount) }} OFF!</span> <s>KSh {{ '%.2f'|format(book.price) }}</s> KSh {{ '%.2f'|format(book.current_price) }}</p><p class="discount-countdown" data-discount-ends-at="{{ book.discount_ends_at.isoformat() }}"></p><button class="button" type="button" data-open-checkout>Buy and download</button>
           {% elif book.price <= 0 %}
             <p class="checkout-price">Free</p>
             <a class="button" href="/books/{{ book.id }}/download">Download e-book</a>
             <p class="payment-note">No payment required. Your PDF download begins immediately.</p>
           {% else %}
             <p class="checkout-price">KSh {{ '%.2f'|format(book.price) }}</p>
-            <a class="button" href="/books/{{ book.id }}/checkout">Buy and download</a>
+            <button class="button" type="button" data-open-checkout>Buy and download</button>
             <p class="payment-note">Secure checkout supports M-Pesa, cards, and PayPal.</p>
           {% endif %}
           <div class="share-link"><span>Share this book</span><div class="share-row"><input id="share-url" value="{{ request.url }}" readonly aria-label="Shareable link for {{ book.title }}"><button class="copy-button" type="button" data-copy-url="{{ request.url }}">Copy link</button></div><small id="copy-status" aria-live="polite"></small></div>
         </article>
       </div>
-    </main>
+    </main>{% if book.current_price > 0 %}<dialog id="checkout-dialog" class="checkout-dialog" aria-labelledby="checkout-title"><section><button class="dialog-close" type="button" data-close-checkout aria-label="Close checkout">×</button><p class="eyebrow">Secure checkout</p><h2 id="checkout-title">Choose a payment method</h2><p class="dialog-book">{{ book.title }} <strong>{% if book.active_discount %}KSh {{ '%.2f'|format(book.current_price) }}{% else %}KSh {{ '%.2f'|format(book.price) }}{% endif %}</strong></p><form class="payment-options" action="/books/{{ book.id }}/checkout/mpesa" method="post"><label class="selected-payment"><input type="radio" name="payment_method" value="mpesa" checked><span><strong>M-Pesa</strong><small>Pay securely with mobile money</small></span></label><label class="unavailable-payment"><input type="radio" disabled><span><strong>Credit or debit card</strong><small>Coming soon</small></span></label><label class="unavailable-payment"><input type="radio" disabled><span><strong>PayPal</strong><small>Coming soon</small></span></label><button class="button" type="submit">Continue with M-Pesa</button></form></section></dialog>{% endif %}
   </body>
 </html>

@@ -12,7 +12,7 @@ router = APIRouter()
 
 @router.get("/", response_model=list[EbookRead])
 def list_ebooks(db: Session = Depends(get_db)) -> list[Ebook]:
-    return list(db.scalars(select(Ebook).order_by(Ebook.id.desc())))
+    return list(db.scalars(select(Ebook).where(Ebook.deleted_at.is_(None)).order_by(Ebook.id.desc())))
 
 
 @router.post("/", response_model=EbookRead, status_code=status.HTTP_201_CREATED)
@@ -27,7 +27,7 @@ def create_ebook(payload: EbookCreate, request: Request, db: Session = Depends(g
 
 @router.get("/{ebook_id}", response_model=EbookRead)
 def get_ebook(ebook_id: int, db: Session = Depends(get_db)) -> Ebook:
-    ebook = db.get(Ebook, ebook_id)
+    ebook = db.scalar(select(Ebook).where(Ebook.id == ebook_id, Ebook.deleted_at.is_(None)))
     if ebook is None:
         raise HTTPException(status_code=404, detail="E-book not found")
     return ebook

@@ -23,3 +23,14 @@ document.querySelector("[data-copy-url]")?.addEventListener("click", async (even
     status.textContent = "Link copied.";
   }
 });
+
+const checkoutDialog = document.querySelector("#checkout-dialog");
+document.querySelector("[data-open-checkout]")?.addEventListener("click", () => {
+  checkoutDialog?.showModal();
+});
+document.querySelector("[data-close-checkout]")?.addEventListener("click", () => {
+  checkoutDialog?.close();
+});
+checkoutDialog?.addEventListener("click", (event) => {
+  if (event.target === checkoutDialog) checkoutDialog.close();
+});
