@@ -3,7 +3,9 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# This local app is configured from its project `.env`; prefer it over stale
+# values inherited from a parent terminal or system environment.
+load_dotenv(override=True)
 
 
 class Settings:

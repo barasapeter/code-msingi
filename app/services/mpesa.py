@@ -14,6 +14,23 @@ TOKEN_URL = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_cre
 STK_PUSH_URL = "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
 
 
+class MpesaApiError(RuntimeError):
+    """Safe provider error that may be displayed to the customer."""
+
+
+def _provider_message(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict):
+        for field in ("errorMessage", "ResponseDescription", "CustomerMessage", "message", "detail"):
+            message = body.get(field)
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+    return f"M-Pesa rejected the request (HTTP {response.status_code})."
+
+
 def normalize_kenyan_phone(phone: str) -> str:
     digits = "".join(character for character in phone if character.isdigit())
     if digits.startswith("0"):
@@ -44,8 +61,12 @@ async def initiate_stk_push(
         token_response = await client.get(
             TOKEN_URL, auth=(settings.mpesa_consumer_key, settings.mpesa_consumer_secret)
         )
-        token_response.raise_for_status()
-        access_token = token_response.json()["access_token"]
+        if token_response.is_error:
+            raise MpesaApiError(_provider_message(token_response))
+        try:
+            access_token = token_response.json()["access_token"]
+        except (KeyError, ValueError) as exc:
+            raise MpesaApiError("M-Pesa did not return a valid access token.") from exc
         response = await client.post(
             STK_PUSH_URL,
             headers={"Authorization": f"Bearer {access_token}"},
@@ -54,7 +75,7 @@ async def initiate_stk_push(
                 "Password": password,
                 "Timestamp": timestamp,
                 "TransactionType": "CustomerPayBillOnline",
-                "Amount": int(round(amount)),
+                "Amount": str(round(amount)),
                 "PartyA": phone_number,
                 "PartyB": settings.mpesa_shortcode,
                 "PhoneNumber": phone_number,
@@ -63,5 +84,28 @@ async def initiate_stk_push(
                 "TransactionDesc": description[:13],
             },
         )
-        response.raise_for_status()
-        return response.json()
+        import pprint
+        print("Payload:")
+        pprint.pprint({
+                        "BusinessShortCode": settings.mpesa_shortcode,
+                        "Password": password,
+                        "Timestamp": timestamp,
+                        "TransactionType": "CustomerPayBillOnline",
+                        "Amount": str(round(amount)),
+                        "PartyA": phone_number,
+                        "PartyB": settings.mpesa_shortcode,
+                        "PhoneNumber": phone_number,
+                        "CallBackURL": settings.mpesa_callback_url,
+                        "AccountReference": account_reference[:12],
+                        "TransactionDesc": description[:13],
+                    })
+        print("Callback URL:", settings.mpesa_callback_url)
+        if response.is_error:
+            raise MpesaApiError(_provider_message(response))
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise MpesaApiError("M-Pesa returned an unreadable payment response.") from exc
+        if result.get("ResponseCode") not in (None, "0", 0):
+            raise MpesaApiError(_provider_message(response))
+        return result

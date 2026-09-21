@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.ebook import Ebook
 from app.models.payment import MpesaPayment
 from app.services.pdf_uploads import MEDIA_DIR, PDF_DIR, save_pdf_and_thumbnail
-from app.services.mpesa import initiate_stk_push, normalize_kenyan_phone
+from app.services.mpesa import MpesaApiError, initiate_stk_push, normalize_kenyan_phone
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -22,6 +22,34 @@ router = APIRouter(include_in_schema=False)
 
 class MpesaPaymentRequest(BaseModel):
     phone_number: str
+
+
+def payment_reason(payment: MpesaPayment) -> str:
+    """Return Safaricom's saved explanation for an unsuccessful payment."""
+    if payment.status != "failed" or not payment.callback_payload:
+        return ""
+    try:
+        return (
+            json.loads(payment.callback_payload)
+            .get("Body", {})
+            .get("stkCallback", {})
+            .get("ResultDesc", "")
+        )
+    except (TypeError, ValueError):
+        return ""
+
+
+def session_payment(request: Request, db: Session, book_id: int) -> MpesaPayment | None:
+    """Find the last M-Pesa request for this checkout in this browser session."""
+    checkout_request_id = request.session.get("mpesa_checkout_request_id")
+    if not isinstance(checkout_request_id, str):
+        return None
+    return db.scalar(
+        select(MpesaPayment).where(
+            MpesaPayment.checkout_request_id == checkout_request_id,
+            MpesaPayment.book_id == book_id,
+        )
+    )
 
 
 @router.get("/")
@@ -59,7 +87,20 @@ def mpesa_payment_page(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=403, detail="Choose a paid book before opening M-Pesa checkout."
         )
-    return templates.TemplateResponse(request, "mpesa_payment.html", {"book": book})
+    payment = session_payment(request, db, book.id)
+    payment_state = None
+    if payment is not None:
+        payment_state = {
+            "status": payment.status,
+            "reason": payment_reason(payment),
+            "phone_number": payment.phone_number,
+            "download_url": (
+                f"/books/{book.id}/download" if payment.status == "paid" else ""
+            ),
+        }
+    return templates.TemplateResponse(
+        request, "mpesa_payment.html", {"book": book, "payment_state": payment_state}
+    )
 
 
 @router.post("/payments/mpesa")
@@ -90,11 +131,13 @@ async def request_mpesa_payment(
             description=f"Ebook {book.id}",
         )
         print("Result:", result)
-    except (RuntimeError, httpx.HTTPError, KeyError) as exc:
+    except MpesaApiError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=502)
+    except (RuntimeError, httpx.HTTPError, KeyError):
         return JSONResponse(
             {
                 "ok": False,
-                "message": "We could not contact M-Pesa. Check the configuration and try again.",
+                "message": "We could not contact M-Pesa. Please try again shortly.",
             },
             status_code=502,
         )
@@ -129,18 +172,15 @@ async def mpesa_payment_status(
     request: Request, db: Session = Depends(get_db)
 ) -> dict[str, str]:
     """Return only the payment status belonging to this browser session."""
-    checkout_request_id = request.session.get("mpesa_checkout_request_id")
-    if not isinstance(checkout_request_id, str):
+    book_id = request.session.get("mpesa_book_id")
+    if not isinstance(book_id, int):
         return {"status": "none"}
-    payment = db.scalar(
-        select(MpesaPayment).where(
-            MpesaPayment.checkout_request_id == checkout_request_id
-        )
-    )
+    payment = session_payment(request, db, book_id)
     if payment is None:
         return {"status": "none"}
     return {
         "status": payment.status,
+        "reason": payment_reason(payment),
         "download_url": (
             f"/books/{payment.book_id}/download" if payment.status == "paid" else ""
         ),
@@ -165,6 +205,9 @@ async def mpesa_callback(
         payment.status = "paid" if callback.get("ResultCode") == 0 else "failed"
         payment.callback_payload = json.dumps(payload)
         db.commit()
+
+    import pprint
+    pprint.pprint(payload)
     return {"ResultCode": 0}
 
 
