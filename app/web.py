@@ -11,9 +11,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.ebook import Ebook
+from app.models.admin_user import AdminUser
 from app.models.payment import MpesaPayment
 from app.services.pdf_uploads import MEDIA_DIR, PDF_DIR, save_pdf_and_thumbnail
 from app.services.mpesa import MpesaApiError, initiate_stk_push, normalize_kenyan_phone
+from app.services.google_auth import (
+    current_admin_email,
+    google_email_from_callback,
+    google_login_url,
+    is_admin_email,
+    normalized_email,
+)
+from app.config import get_settings
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -252,9 +261,67 @@ def book_detail(book_id: int, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "book_detail.html", {"book": book})
 
 
+@router.get("/admin/login")
+def admin_login(request: Request, db: Session = Depends(get_db)):
+    if current_admin_email(request, db):
+        return RedirectResponse(url="/admin/books/new", status_code=303)
+    return templates.TemplateResponse(request, "admin_login.html")
+
+
+@router.get("/admin/login/google")
+def admin_google_login(request: Request, next_url: str = "/admin/books/new"):
+    return RedirectResponse(url=google_login_url(request, next_url), status_code=303)
+
+
+@router.get("/admin/auth/google/callback", name="google_auth_callback")
+async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
+    email = await google_email_from_callback(request)
+    next_url = request.session.pop("google_oauth_next", "/admin/books/new")
+    if not is_admin_email(email, db):
+        request.session.pop("admin_email", None)
+        return templates.TemplateResponse(request, "admin_login.html", {"error": "This Google account is not authorised to upload materials."}, status_code=403)
+    request.session["admin_email"] = email
+    return RedirectResponse(url=next_url, status_code=303)
+
+
+@router.post("/admin/logout")
+def admin_logout(request: Request):
+    request.session.pop("admin_email", None)
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+
+@router.get("/admin/register")
+def admin_registration_page(request: Request, db: Session = Depends(get_db)):
+    email = current_admin_email(request, db)
+    if email != get_settings().master_admin_email:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    admins = list(db.scalars(select(AdminUser).order_by(AdminUser.email)))
+    return templates.TemplateResponse(request, "admin_register.html", {"admins": admins})
+
+
+@router.post("/admin/register")
+def register_admin(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
+    if current_admin_email(request, db) != get_settings().master_admin_email:
+        raise HTTPException(status_code=403, detail="Only the master administrator can authorise uploaders.")
+    email = normalized_email(email)
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if email != get_settings().master_admin_email and db.scalar(select(AdminUser).where(AdminUser.email == email)) is None:
+        db.add(AdminUser(email=email))
+        db.commit()
+    return RedirectResponse(url="/admin/register", status_code=303)
+
+
 @router.get("/admin/books/new")
-def new_book_form(request: Request):
-    return templates.TemplateResponse(request, "admin_new_book.html")
+def new_book_form(request: Request, db: Session = Depends(get_db)):
+    admin_email = current_admin_email(request, db)
+    if admin_email is None:
+        return RedirectResponse(url="/admin/login", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "admin_new_book.html",
+        {"admin_email": admin_email, "is_master_admin": admin_email == get_settings().master_admin_email},
+    )
 
 
 @router.post("/admin/books/new")
@@ -268,6 +335,9 @@ async def create_book_from_upload(
     pdf: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    admin_email = current_admin_email(request, db)
+    if admin_email is None:
+        raise HTTPException(status_code=401, detail="Sign in with an authorised Google account to upload materials.")
     derived_title = Path(pdf.filename or "").stem.strip()
     final_title = title.strip() or derived_title
     if not final_title:
@@ -287,4 +357,8 @@ async def create_book_from_upload(
     )
     db.add(book)
     db.commit()
-    return templates.TemplateResponse(request, "admin_new_book.html", {"created": book})
+    return templates.TemplateResponse(
+        request,
+        "admin_new_book.html",
+        {"created": book, "admin_email": admin_email, "is_master_admin": admin_email == get_settings().master_admin_email},
+    )

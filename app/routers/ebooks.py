@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.ebook import Ebook
 from app.schemas.ebook import EbookCreate, EbookRead
+from app.services.google_auth import require_admin
 
 router = APIRouter()
 
@@ -15,7 +16,8 @@ def list_ebooks(db: Session = Depends(get_db)) -> list[Ebook]:
 
 
 @router.post("/", response_model=EbookRead, status_code=status.HTTP_201_CREATED)
-def create_ebook(payload: EbookCreate, db: Session = Depends(get_db)) -> Ebook:
+def create_ebook(payload: EbookCreate, request: Request, db: Session = Depends(get_db)) -> Ebook:
+    require_admin(request, db)
     ebook = Ebook(**payload.model_dump())
     db.add(ebook)
     db.commit()

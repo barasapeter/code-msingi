@@ -24,7 +24,7 @@ The template landing page is available at `/`. Add browser assets in `app/static
 
 ## Book uploads
 
-Visit `/admin/books/new` to upload a PDF and enter its title, short description, extended description, and price. Each PDF is stored in `app/media/ebooks`; its first page is rendered to a JPEG in `app/media/thumbnails` and displayed in the storefront. The admin route is intentionally unauthenticated in this starter scaffold—protect it with authentication and authorization before deploying.
+Visit `/admin/books/new` to upload a PDF and enter its title, short description, extended description, and price. Each PDF is stored in `app/media/ebooks`; its first page is rendered to a JPEG in `app/media/thumbnails` and displayed in the storefront. Uploading requires Google sign-in. The master administrator (`barasapeter52@gmail.com`, configurable with `MASTER_ADMIN_EMAIL`) can open `/admin/register` to authorise additional Google email addresses. Configure `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and register `/admin/auth/google/callback` as an authorised redirect URI in Google Cloud. Set `GOOGLE_OAUTH_REDIRECT_URL` to the public callback URL when the app runs behind a proxy.
 
 The listing's Download link opens `/books/{book_id}/checkout` for paid books, which presents full book details and payment-method choices. Set a book's price to `0` in the uploader to mark it **Free**: its Download link serves the PDF immediately. The payment button is intentionally a UI placeholder until a payment provider is selected and integrated.
 
