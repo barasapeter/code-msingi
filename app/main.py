@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings
 from app.database import Base, engine, run_migrations
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax")
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
     # Covers are public; PDFs are deliberately served only by the download route.
     app.mount("/media/thumbnails", StaticFiles(directory=MEDIA_DIR / "thumbnails"), name="media")

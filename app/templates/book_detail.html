@@ -21,7 +21,7 @@
             <a class="button" href="/books/{{ book.id }}/download">Download e-book</a>
             <p class="payment-note">No payment required. Your PDF download begins immediately.</p>
           {% else %}
-            <p class="checkout-price">${{ '%.2f'|format(book.price) }}</p>
+            <p class="checkout-price">KSh {{ '%.2f'|format(book.price) }}</p>
             <a class="button" href="/books/{{ book.id }}/checkout">Buy and download</a>
             <p class="payment-note">Secure checkout supports M-Pesa, cards, and PayPal.</p>
           {% endif %}

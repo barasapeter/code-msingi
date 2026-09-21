@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Checkout — {{ book.title }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}"><link rel="stylesheet" href="{{ url_for('static', path='css/mpesa.css') }}">
   </head>
   <body>
     <main class="checkout">
@@ -13,13 +13,13 @@
         <section>
           <p class="eyebrow">Your e-book</p><h1>{{ book.title }}</h1><p class="book-author">By {{ book.author }}</p>
           <p class="lead">{{ book.description }}</p><p>{{ book.details }}</p>
-          <p class="checkout-price">${{ '%.2f'|format(book.price) }}</p>
+          <p class="checkout-price">KSh {{ '%.2f'|format(book.price) }}</p>
           <h2>Choose a payment method</h2>
-          <form class="payment-options">
-            <label><input type="radio" name="payment_method" value="mpesa" checked><span><strong>M-Pesa</strong><small>Pay with your mobile money account</small></span></label>
-            <label><input type="radio" name="payment_method" value="card"><span><strong>Credit or debit card</strong><small>Visa, Mastercard, or American Express</small></span></label>
-            <label><input type="radio" name="payment_method" value="paypal"><span><strong>PayPal</strong><small>Use your PayPal account</small></span></label>
-            <button class="button" type="button">Continue to secure payment</button>
+          <form class="payment-options" action="/books/{{ book.id }}/checkout/mpesa" method="post">
+            <label class="selected-payment"><input type="radio" name="payment_method" value="mpesa" checked><span><strong>M-Pesa</strong><small>Pay with your mobile money account</small></span></label>
+            <label class="unavailable-payment"><input type="radio" disabled><span><strong>Credit or debit card</strong><small>Coming soon</small></span></label>
+            <label class="unavailable-payment"><input type="radio" disabled><span><strong>PayPal</strong><small>Coming soon</small></span></label>
+            <button class="button mpesa-button" type="submit"><img src="{{ url_for('static', path='images/lipa-na-mpesa.png') }}" alt="Lipa na M-Pesa">Pay with M-Pesa</button>
           </form>
           <p class="payment-note">The download is released after payment. Connect this button to your payment provider before publishing.</p>
         </section>

@@ -30,4 +30,6 @@ The listing's Download link opens `/books/{book_id}/checkout` for paid books, wh
 
 Every book also has a shareable public page at `/books/{book_id}`. It presents a direct download for free books and the checkout path for paid books.
 
+Paid checkout supports the asynchronous M-Pesa flow at `/payments/mpesa`. The selected book and checkout reference are stored in the signed session; Safaricom's callback at `/payments/mpesa/callback` records the final payment state before allowing the paid download. Configure the Daraja credentials and a public HTTPS callback URL before sending real payment prompts.
+
 The starter automatically adds newly introduced nullable e-book columns to an existing SQLite database at startup, preserving current records. Use Alembic migrations once the schema becomes production-critical.

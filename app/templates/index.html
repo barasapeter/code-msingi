@@ -24,7 +24,7 @@
         {% for book in books %}
         <article class="book-card">
           {% if book.thumbnail_path %}<img src="{{ book.thumbnail_path }}" alt="Cover preview for {{ book.title }}">{% else %}<div class="thumbnail-placeholder">No cover preview</div>{% endif %}
-          <div><p class="book-author">{{ book.author }}</p><h3><a class="book-title-link" href="/books/{{ book.id }}">{{ book.title }}</a></h3><p>{{ book.description }}</p><p class="book-details">{{ book.details }}</p><div class="book-action"><span class="price">{% if book.price <= 0 %}Free{% else %}${{ '%.2f'|format(book.price) }}{% endif %}</span><a class="text-button" href="/books/{{ book.id }}">View book</a></div></div>
+          <div><p class="book-author">{{ book.author }}</p><h3><a class="book-title-link" href="/books/{{ book.id }}">{{ book.title }}</a></h3><p>{{ book.description }}</p><p class="book-details">{{ book.details }}</p><div class="book-action"><span class="price">{% if book.price <= 0 %}Free{% else %}KSh {{ '%.2f'|format(book.price) }}{% endif %}</span><a class="text-button" href="/books/{{ book.id }}">View book</a></div></div>
         </article>
         {% endfor %}
       </div>
