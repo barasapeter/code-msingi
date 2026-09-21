@@ -60,6 +60,10 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+ebooks.db
+ebooks.db-journal
+app/media/ebooks/*.pdf
+app/media/thumbnails/*.jpg
 
 # Flask stuff:
 instance/

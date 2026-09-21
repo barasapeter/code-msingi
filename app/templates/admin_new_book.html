@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Upload book — Code Msingi</title><link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}"><script defer src="{{ url_for('static', path='js/site.js') }}"></script></head>
+<body><main class="admin"><a href="/">← Back to library</a><p class="eyebrow">Admin</p><h1>Upload an e-book</h1>
+{% if created %}<p class="notice"><strong>{{ created.title }}</strong> was published. Its cover thumbnail was created from page one.</p>{% endif %}
+<form method="post" enctype="multipart/form-data">
+  <label>Title<input id="title" name="title" required maxlength="255"><small>Filled automatically from the PDF filename; you can edit it.</small></label>
+  <label>Author<input name="author" required maxlength="255"></label>
+  <label>Short description<textarea name="description" required></textarea></label>
+  <label>Extended description<textarea name="details" required></textarea></label>
+  <label>Price (USD)<input name="price" type="number" min="0" step="0.01" required></label>
+  <label>PDF file<input id="pdf" name="pdf" type="file" accept="application/pdf,.pdf" required></label>
+  <button class="button" type="submit">Upload and publish</button>
+</form></main></body></html>

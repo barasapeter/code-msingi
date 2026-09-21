@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ book.title }} — Code Msingi</title>
+    <meta name="description" content="{{ book.description }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/site.css') }}">
+    <script defer src="{{ url_for('static', path='js/site.js') }}"></script>
+  </head>
+  <body>
+    <main class="book-page">
+      <a class="back" href="/">← Back to library</a>
+      <div class="book-page-grid">
+        <div class="book-page-cover">{% if book.thumbnail_path %}<img src="{{ book.thumbnail_path }}" alt="Cover preview for {{ book.title }}">{% else %}<div class="thumbnail-placeholder">No cover preview</div>{% endif %}</div>
+        <article>
+          <p class="eyebrow">{% if book.price <= 0 %}Free e-book{% else %}E-book{% endif %}</p>
+          <h1>{{ book.title }}</h1><p class="book-author">By {{ book.author }}</p>
+          <p class="lead">{{ book.description }}</p><p>{{ book.details }}</p>
+          {% if book.price <= 0 %}
+            <p class="checkout-price">Free</p>
+            <a class="button" href="/books/{{ book.id }}/download">Download e-book</a>
+            <p class="payment-note">No payment required. Your PDF download begins immediately.</p>
+          {% else %}
+            <p class="checkout-price">${{ '%.2f'|format(book.price) }}</p>
+            <a class="button" href="/books/{{ book.id }}/checkout">Buy and download</a>
+            <p class="payment-note">Secure checkout supports M-Pesa, cards, and PayPal.</p>
+          {% endif %}
+          <div class="share-link"><span>Share this book</span><div class="share-row"><input id="share-url" value="{{ request.url }}" readonly aria-label="Shareable link for {{ book.title }}"><button class="copy-button" type="button" data-copy-url="{{ request.url }}">Copy link</button></div><small id="copy-status" aria-live="polite"></small></div>
+        </article>
+      </div>
+    </main>
+  </body>
+</html>
