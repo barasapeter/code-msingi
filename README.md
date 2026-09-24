@@ -5,6 +5,7 @@ Master the fundamentals. Let AI make you 100×. That's what makes you hireable.
 
 Buy our E-Books and master the fundamentals.
 
+Tunnel [Dev] `cloudflared tunnel --url http://localhost:8000`
 ## API scaffold
 
 This repository includes a small FastAPI API scaffold with SQLite, SQLAlchemy ORM, an application factory, and modular routers.
