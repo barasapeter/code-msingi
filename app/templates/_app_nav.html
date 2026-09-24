@@ -1,0 +1,8 @@
+<header class="app-nav">
+  <nav class="container" aria-label="Application navigation">
+    <a href="/">Library</a>
+    <a href="/admin/books/new">Upload</a>
+    <a href="/admin/dashboard">Dashboard</a>
+    {% if is_master_admin %}<a href="/admin/register">Uploaders</a><a href="/admin/trash">Trash</a>{% endif %}
+  </nav>
+</header>

@@ -4,7 +4,7 @@ import json
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
@@ -72,11 +72,39 @@ def can_manage_book(book: Ebook, admin_email: str) -> bool:
     return admin_email == get_settings().master_admin_email or book.uploader_email == admin_email
 
 
+def record_paid_sale(db: Session, payment: MpesaPayment) -> bool:
+    """Create the sale for a settled M-Pesa payment exactly once.
+
+    Callback delivery can be delayed or legacy payments may predate sales
+    recording, so the dashboard also uses this idempotent reconciliation step.
+    """
+    if payment.status != "paid" or db.scalar(select(Sale.id).where(Sale.payment_id == payment.id)) is not None:
+        return False
+    book = db.get(Ebook, payment.book_id)
+    if book is None:
+        return False
+    db.add(
+        Sale(
+            book_id=book.id,
+            seller_email=book.uploader_email or get_settings().master_admin_email,
+            amount=payment.amount if payment.amount is not None else book.current_price,
+            sale_type="mpesa_payment",
+            payment_id=payment.id,
+        )
+    )
+    return True
+
+
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     books = list(db.scalars(select(Ebook).where(Ebook.deleted_at.is_(None)).order_by(Ebook.id.desc())))
     return templates.TemplateResponse(request, "index.html", {"books": books})
 
+@router.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return """User-agent: *
+Allow: /
+"""
 
 @router.get("/books/{book_id}/checkout")
 def checkout(book_id: int, request: Request, db: Session = Depends(get_db)):
@@ -226,10 +254,7 @@ async def mpesa_callback(
     if payment is not None:
         payment.status = "paid" if callback.get("ResultCode") == 0 else "failed"
         payment.callback_payload = json.dumps(payload)
-        if payment.status == "paid" and db.scalar(select(Sale.id).where(Sale.payment_id == payment.id)) is None:
-            book = db.get(Ebook, payment.book_id)
-            if book is not None:
-                db.add(Sale(book_id=book.id, seller_email=book.uploader_email or get_settings().master_admin_email, amount=payment.amount if payment.amount is not None else book.current_price, sale_type="mpesa_payment", payment_id=payment.id))
+        record_paid_sale(db, payment)
         db.commit()
 
     return {"ResultCode": 0}
@@ -350,6 +375,14 @@ def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     admin_email = current_admin_email(request, db)
     if admin_email is None:
         return RedirectResponse(url="/admin/login", status_code=303)
+    # Reconcile completed payments that were paid before sales recording was
+    # introduced or whose callback was retried after an interrupted request.
+    reconciled = False
+    for payment in db.scalars(select(MpesaPayment).where(MpesaPayment.status == "paid")):
+        reconciled = record_paid_sale(db, payment) or reconciled
+    if reconciled:
+        db.commit()
+
     book_filter = Ebook.deleted_at.is_(None)
     if admin_email != get_settings().master_admin_email:
         book_filter = book_filter & (Ebook.uploader_email == admin_email)
